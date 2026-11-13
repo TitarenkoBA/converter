@@ -1,0 +1,64 @@
+# Builds the static site (prerendered pages, sitemap, 404) and publishes it to GitHub Pages.
+# One-time setup: repo Settings → Pages → Build and deployment → Source: "GitHub Actions".
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never cancel a deploy halfway; queue the next one instead.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # Provides the public address: https://<user>.github.io/<repo> now,
+      # or the custom domain once one is set in the Pages settings.
+      - id: pages
+        uses: actions/configure-pages@v5
+
+      - run: npm ci
+
+      - run: npm test -- --watch=false
+
+      - name: Use the Pages address for canonical URLs, hreflang and sitemap
+        run: |
+          node -e '
+            const fs = require("fs");
+            const config = JSON.parse(fs.readFileSync("site.config.json", "utf8"));
+            config.url = process.argv[1];
+            fs.writeFileSync("site.config.json", JSON.stringify(config, null, 2) + "\n");
+          ' "${{ steps.pages.outputs.base_url }}"
+
+      # base_path is "/<repo>" on github.io and "" on a custom domain.
+      - run: npm run build -- --base-href "${{ steps.pages.outputs.base_path }}/"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/converter/browser
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

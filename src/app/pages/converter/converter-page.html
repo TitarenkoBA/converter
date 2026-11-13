@@ -1,0 +1,196 @@
+<section class="space-y-6">
+  <header>
+    <h1 class="text-2xl font-bold tracking-tight sm:text-3xl">
+      {{ i18n.t('converter.title', { from: from().label, to: to().label }) }}
+    </h1>
+    <p class="mt-1 text-slate-600 dark:text-slate-400">
+      {{ i18n.t('converter.subtitle', { from: from().label, to: to().label }) }}
+    </p>
+  </header>
+
+  @if (!encodeSupported()) {
+    <p class="alert alert-warn" role="alert">{{ i18n.t('msg.encodeUnsupported', { format: to().label }) }}</p>
+  }
+
+  @if (hasOptions()) {
+    <fieldset class="card grid gap-5 p-4 sm:grid-cols-2">
+      <legend class="sr-only">{{ i18n.t('opts.title') }}</legend>
+
+      @if (to().lossy) {
+        <label class="block">
+          <span class="flex justify-between text-sm font-medium">
+            <span>{{ i18n.t('opts.quality') }}</span>
+            <span class="tabular-nums text-slate-500">{{ qualityDraft() }}%</span>
+          </span>
+          <input
+            type="range"
+            min="10"
+            max="100"
+            step="1"
+            class="mt-2 w-full accent-indigo-600"
+            [value]="qualityDraft()"
+            (input)="qualityDraft.set(+$any($event.target).value)"
+            (change)="commitQuality($event)"
+          />
+        </label>
+      }
+
+      @if (!to().alpha) {
+        <label class="flex items-center justify-between gap-3">
+          <span class="text-sm font-medium">{{ i18n.t('opts.background') }}</span>
+          <input
+            type="color"
+            class="h-9 w-14 cursor-pointer rounded border border-slate-300 bg-transparent dark:border-slate-700"
+            [value]="background()"
+            (change)="setBackground($event)"
+          />
+        </label>
+      }
+
+      @if (from().id === 'svg') {
+        <label class="block">
+          <span class="text-sm font-medium">{{ i18n.t('opts.svgWidth') }}</span>
+          <input
+            type="number"
+            min="1"
+            [max]="maxSvgWidth"
+            class="input mt-2"
+            [placeholder]="i18n.t('opts.svgWidthAuto')"
+            [value]="svgWidth() ?? ''"
+            (change)="setSvgWidth($event)"
+          />
+        </label>
+      }
+
+      @if (to().id === 'ico') {
+        <div class="sm:col-span-2">
+          <span class="text-sm font-medium">{{ i18n.t('opts.icoSizes') }}</span>
+          <div class="mt-2 flex flex-wrap gap-2">
+            @for (size of icoSizeChoices; track size) {
+              <label class="chip" [class.chip-active]="icoSizes().includes(size)">
+                <input
+                  type="checkbox"
+                  class="sr-only"
+                  [checked]="icoSizes().includes(size)"
+                  (change)="toggleIcoSize(size)"
+                />
+                {{ size }}×{{ size }}
+              </label>
+            }
+          </div>
+        </div>
+      }
+    </fieldset>
+  }
+
+  @if (batch()) {
+    <p class="flex items-center gap-2 text-sm text-indigo-700 dark:text-indigo-300">
+      <span class="rounded-md bg-indigo-600 px-1.5 py-0.5 text-xs font-semibold text-white">{{ i18n.t('pro.badge') }}</span>
+      {{ i18n.t('pro.batch') }}
+    </p>
+  }
+
+  <app-dropzone [accept]="accept()" [formatLabel]="from().label" [multiple]="batch()" (files)="addFiles($event)" />
+
+  @if (from().id === 'gif') {
+    <p class="text-sm text-slate-500">{{ i18n.t('msg.gifFirstFrame') }}</p>
+  }
+
+  @if (notice(); as n) {
+    <p class="alert alert-info" role="status">{{ i18n.t(n.key, n.params) }}</p>
+  }
+
+  @if (jobs().length) {
+    <div class="space-y-3">
+      @if (batch()) {
+        <div class="flex flex-wrap items-center justify-end gap-2">
+          @if (license.limits().zipDownload && doneJobs().length > 1) {
+            <button type="button" class="btn btn-primary" [disabled]="zipping()" (click)="downloadAll()">
+              {{ i18n.t('actions.downloadAll') }}
+            </button>
+          }
+          <button type="button" class="btn btn-ghost" (click)="clear()">{{ i18n.t('actions.clear') }}</button>
+        </div>
+      }
+
+      <ul class="space-y-3">
+        @for (job of jobs(); track job.id) {
+          <li class="card flex items-center gap-4 p-3">
+            <div class="bg-checker grid size-16 shrink-0 place-items-center overflow-hidden rounded-lg">
+              @if (job.url) {
+                <img [src]="job.url" alt="" class="max-h-full max-w-full object-contain" />
+              } @else if (job.status === 'working' || job.status === 'pending') {
+                <span class="size-6 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent"></span>
+              }
+            </div>
+
+            <div class="min-w-0 flex-1">
+              <p class="truncate font-medium" [title]="job.outName">{{ job.outName }}</p>
+              <p class="text-sm text-slate-500">
+                {{ i18n.formatBytes(job.file.size) }}
+                @if (job.result) {
+                  → {{ i18n.formatBytes(job.result.size) }}
+                }
+                · {{ i18n.t(statusKey(job.status)) }}
+              </p>
+              @if (job.error) {
+                <p class="text-sm text-red-600 dark:text-red-400">{{ i18n.t(job.error, { format: to().label }) }}</p>
+              }
+            </div>
+
+            @if (job.url) {
+              <a class="btn btn-primary" [href]="job.url" [download]="job.outName">{{ i18n.t('actions.download') }}</a>
+            }
+            @if (batch()) {
+              <button
+                type="button"
+                class="btn btn-ghost px-2"
+                [attr.aria-label]="i18n.t('actions.remove')"
+                [title]="i18n.t('actions.remove')"
+                (click)="remove(job)"
+              >
+                <svg class="size-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+                </svg>
+              </button>
+            }
+          </li>
+        }
+      </ul>
+    </div>
+  }
+
+  <!-- Static content for search engines and first-time visitors -->
+  <div class="grid gap-6 pt-6 md:grid-cols-2">
+    <section class="card p-6" aria-labelledby="how-title">
+      <h2 id="how-title" class="text-lg font-semibold">{{ i18n.t('converter.how.title', { from: from().label, to: to().label }) }}</h2>
+      <ol class="mt-3 list-decimal space-y-2 pl-5 text-slate-600 dark:text-slate-400">
+        <li>{{ i18n.t('converter.how.step1', { from: from().label }) }}</li>
+        <li>{{ i18n.t('converter.how.step2') }}</li>
+        <li>{{ i18n.t('converter.how.step3', { to: to().label }) }}</li>
+      </ol>
+    </section>
+
+    <div class="space-y-6">
+      @for (f of aboutFormats(); track f.id) {
+        <section class="card p-6">
+          <h2 class="text-lg font-semibold">{{ i18n.t('converter.about', { format: f.label }) }}</h2>
+          <p class="mt-2 text-slate-600 dark:text-slate-400">{{ i18n.t(formatKey(f.id)) }}</p>
+        </section>
+      }
+    </div>
+  </div>
+
+  @if (related().length) {
+    <nav aria-labelledby="related-title">
+      <h2 id="related-title" class="mb-3 text-lg font-semibold">{{ i18n.t('converter.related') }}</h2>
+      <div class="flex flex-wrap gap-2">
+        @for (c of related(); track c.slug) {
+          <a [routerLink]="i18n.path(c.slug)" class="chip hover:border-indigo-400">
+            {{ formats[c.from].label }} → {{ formats[c.to].label }}
+          </a>
+        }
+      </div>
+    </nav>
+  }
+</section>
